@@ -1,0 +1,22 @@
+{
+    "[python]": {
+        "editor.defaultFormatter": "ms-python.black-formatter",
+        "editor.formatOnSave": true,
+        "editor.codeActionsOnSave": {
+            "source.organizeImports": true
+        },
+    },
+    "black-formatter.args": [
+        "--line-length",
+        "150"
+    ],
+    "isort.args": [
+        "--profile",
+        "black"
+    ],
+    "[json]": {
+        "editor.formatOnSave": false
+    },
+    "autoDocstring.docstringFormat": "google-notypes",
+    "autoDocstring.startOnNewLine": true
+}
