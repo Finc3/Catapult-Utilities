@@ -1,0 +1,27 @@
+[build-system]
+requires = [
+    "setuptools >= 64"
+]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "frontrow-util"
+description = "Frontrow Utilities"
+readme = "README.rst"
+authors = [{name = "Lukas Moors", email = "me@lukasmoors.com"}]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+keywords = ["locking", "concurrency"]
+requires-python = ">= 3.9"
+dependencies = [
+    "pymongo < 5.0"
+]
+dynamic = ["version"]
