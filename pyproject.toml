@@ -5,8 +5,8 @@ requires = [
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "frontrow-util"
-description = "Frontrow Utilities"
+name = "catapult-util"
+description = "Catapult Utilities"
 readme = "README.rst"
 authors = [{name = "Lukas Moors", email = "me@lukasmoors.com"}]
 classifiers = [
