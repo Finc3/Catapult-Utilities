@@ -18,15 +18,20 @@ class MongoLocks:
     _DEFAULT_DB = "mongo_locks"
     _COL = "locks"
 
-    def __init__(self, client: Union[MongoClient, Database], namespace: str):
+    def __init__(self, client: Union[MongoClient, Database], namespace: str, disabled: bool = False):
         """
         _summary_
 
         Args:
             client: Pass either a MongoClient or MongoClient.Database object
             namespace: A string that will be prefixed to all lock keys acquired by this instance
+            disabled: When set to True, all lock attempts will be ignored. Intended for use during development.
 
         """
+        self._disabled = disabled
+        if disabled:
+            return
+
         self._ns = namespace
         if isinstance(client, MongoClient):
             self._client = client[self._DEFAULT_DB][self._COL]
@@ -76,6 +81,8 @@ class MongoLocks:
         return outer
 
     def _acquire(self, key: str, expire_in=int):
+        if self._disabled:
+            return True
         if not self._initialized:
             self._initialize()
         key = f"{self._ns}__{key}"
@@ -96,6 +103,8 @@ class MongoLocks:
         return locked
 
     def _release(self, key: str):
+        if self._disabled:
+            return
         key = f"{self._ns}__{key}"
         self._client.delete_one({"_id": key})
         self._locks.discard(key)
