@@ -1,3 +1,4 @@
+import logging
 from contextlib import contextmanager
 from functools import wraps
 from threading import Thread
@@ -9,6 +10,8 @@ import pymongo
 from pymongo import MongoClient, ReturnDocument
 from pymongo.database import Database
 
+logger = logging.getLogger(__name__)
+
 
 class LockFailure(Exception):
     """Can be raised when a lock could not be established"""
@@ -17,6 +20,7 @@ class LockFailure(Exception):
 class MongoLocks:
     _DEFAULT_DB = "mongo_locks"
     _COL = "locks"
+    _MAX_AGE = 10  # the maximum age a lock can be before it is considered stale and will be released
 
     def __init__(self, client: Union[MongoClient, Database], namespace: str, disabled: bool = False):
         """
@@ -44,35 +48,33 @@ class MongoLocks:
         self._initialized = False
 
     @contextmanager
-    def lock(self, key: str, expire_in: int = 60, raise_on_failure: bool = True) -> bool:
+    def lock(self, key: str, raise_on_failure: bool = True) -> bool:
         """Context manager to acquire and release an application-wide lock on a resource.
 
         Args:
             key (str): The name of the resource to lock.
-            expire_in (int, optional): For how long the lock should be held in seconds. Should be longer than the expected duration of the operation. Defaults to 600.
             raise_on_failure (bool, optional): Whether or not to raise `LockFailure` when a lock could not be achieved.
         """
-        locked = self._acquire(key, expire_in)
+        locked = self._acquire(key, self._MAX_AGE)
         if not locked and raise_on_failure:
             raise LockFailure
         yield locked
         if locked:
             self._release(key)
 
-    def with_lock(self, key: str, expire_in: int = 60, raise_on_failure: bool = False):
+    def with_lock(self, key: str, raise_on_failure: bool = False):
         """Decorator to acquire and release an application-wide lock on a resource.
         Silently ignores execution if `raise_on_failure` is False and lock could not be acquired.
 
         Args:
             key (str): The name of the resource to lock.
-            expire_in (int, optional): For how long the lock should be held in seconds. Should be longer than the expected duration of the operation. Defaults to 600.
             raise_on_failure (bool, optional): Whether or not to raise `LockFailure` when a lock could not be achieved.
         """
 
         def outer(f):
             @wraps(f)
             def inner():
-                with self.lock(key, expire_in=expire_in, raise_on_failure=raise_on_failure) as lock:
+                with self.lock(key, expire_in=self._MAX_AGE, raise_on_failure=raise_on_failure) as lock:
                     if lock:
                         f()
 
@@ -117,4 +119,7 @@ class MongoLocks:
         while True:
             sleep(10)
             for lock_key in self._locks:
-                self._client.find_one_and_update({"_id": lock_key}, {"$inc": {"expires_at": 10}})
+                try:
+                    self._client.find_one_and_update({"_id": lock_key}, {"$inc": {"expires_at": 10}})
+                except Exception as e:
+                    logger.exception(f"Error while updating lock {lock_key}: {e}")
