@@ -48,7 +48,7 @@ class MongoLocks:
         self._initialized = False
 
     @contextmanager
-    def lock(self, key: str, raise_on_failure: bool = True) -> bool:
+    def lock(self, key: str, raise_on_failure: bool = False) -> bool:
         """Context manager to acquire and release an application-wide lock on a resource.
 
         Args:
