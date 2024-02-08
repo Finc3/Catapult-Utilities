@@ -16,7 +16,7 @@ mongo_locks = MongoLocks(mc, "my_project")
 
 
 # This operation is now protected by a lock for the duration of this method execution
-@mongo_locks.with_lock("op1")
+@mongo_locks.lock("op1")
 def op1():
     print("Working...")
     sleep(20)

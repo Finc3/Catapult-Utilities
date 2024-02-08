@@ -48,39 +48,47 @@ class MongoLocks:
         self._initialized = False
 
     @contextmanager
-    def lock(self, key: str, raise_on_failure: bool = False) -> bool:
+    def lock_context(self, key: str, *, raise_exceptions: bool = False) -> bool:
         """Context manager to acquire and release an application-wide lock on a resource.
 
         Args:
             key (str): The name of the resource to lock.
-            raise_on_failure (bool, optional): Whether or not to raise `LockFailure` when a lock could not be achieved.
+            raise_exceptions (bool, optional): Whether or not to raise `LockFailure` when a lock could not be achieved.
         """
         locked = self._acquire(key, self._MAX_AGE)
-        if not locked and raise_on_failure:
+        if not locked and raise_exceptions:
             raise LockFailure
         yield locked
         if locked:
             self._release(key)
 
-    def with_lock(self, key: str, raise_on_failure: bool = False):
+    def lock(self, key: str, *, raise_exceptions: bool = False):
         """Decorator to acquire and release an application-wide lock on a resource.
-        Silently ignores execution if `raise_on_failure` is False and lock could not be acquired.
+        Silently ignores execution if `raise_exceptions` is False and lock could not be acquired.
 
         Args:
             key (str): The name of the resource to lock.
-            raise_on_failure (bool, optional): Whether or not to raise `LockFailure` when a lock could not be achieved.
+            raise_exceptions (bool, optional): Whether or not to raise `LockFailure` when a lock could not be achieved.
         """
 
+        key_name = key.__name__ if callable(key) else key
+
         def outer(f):
+            print(f, key_name)
+
             @wraps(f)
             def inner():
-                with self.lock(key, expire_in=self._MAX_AGE, raise_on_failure=raise_on_failure) as lock:
+                with self.lock_context(key_name, raise_exceptions=raise_exceptions) as lock:
                     if lock:
                         f()
 
             return inner
 
-        return outer
+        if callable(key):
+            # assuming simplified usage, e.g. key = f.__name__
+            return outer(key)
+        else:
+            return outer
 
     def _acquire(self, key: str, expire_in=int):
         if self._disabled:
