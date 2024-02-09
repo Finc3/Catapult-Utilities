@@ -74,8 +74,6 @@ class MongoLocks:
         key_name = key.__name__ if callable(key) else key
 
         def outer(f):
-            print(f, key_name)
-
             @wraps(f)
             def inner():
                 with self.lock_context(key_name, raise_exceptions=raise_exceptions) as lock:
