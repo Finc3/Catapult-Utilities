@@ -20,7 +20,7 @@ class LockFailure(Exception):
 class MongoLocks:
     _DEFAULT_DB = "mongo_locks"
     _COL = "locks"
-    _MAX_AGE = 10  # the maximum age a lock can be before it is considered stale and will be released
+    _MAX_AGE = 10  # the maximum age (in seconds) a lock can be held (without being refreshed) before it is considered stale and will be released
 
     def __init__(self, client: Union[MongoClient, Database], namespace: str, disabled: bool = False):
         """
@@ -58,9 +58,11 @@ class MongoLocks:
         locked = self._acquire(key, self._MAX_AGE)
         if not locked and raise_exceptions:
             raise LockFailure
-        yield locked
-        if locked:
-            self._release(key)
+        try:
+            yield locked
+        except Exception:
+            if locked:
+                self._release(key)
 
     def lock(self, key: str, *, raise_exceptions: bool = False):
         """Decorator to acquire and release an application-wide lock on a resource.
@@ -123,9 +125,9 @@ class MongoLocks:
 
     def _heartbeat_worker(self):
         while True:
-            sleep(10)
+            sleep(self._MAX_AGE // 3)
             for lock_key in self._locks:
                 try:
-                    self._client.find_one_and_update({"_id": lock_key}, {"$inc": {"expires_at": 10}})
+                    self._client.find_one_and_update({"_id": lock_key}, {"$set": {"expires_at": time() + self._MAX_AGE}})
                 except Exception as e:
                     logger.exception(f"Error while updating lock {lock_key}: {e}")
