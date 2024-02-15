@@ -126,7 +126,7 @@ class MongoLocks:
     def _heartbeat_worker(self):
         while True:
             sleep(self._MAX_AGE // 3)
-            for lock_key in self._locks:
+            for lock_key in tuple(self._locks):
                 try:
                     self._client.find_one_and_update({"_id": lock_key}, {"$set": {"expires_at": time() + self._MAX_AGE}})
                 except Exception as e:
