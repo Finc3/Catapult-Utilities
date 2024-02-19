@@ -1,4 +1,5 @@
 import logging
+import os
 from contextlib import contextmanager
 from functools import wraps
 from threading import Thread
@@ -46,6 +47,7 @@ class MongoLocks:
         self._con_id = (self._client.database.client.HOST, self._client.database.client.PORT)
         self._locks = set()
         self._initialized = False
+        self._launch_pid = None  # Used to ensure that a fully initialized MongoLocks instance does not get forked
 
     @contextmanager
     def lock_context(self, key: str, *, raise_exceptions: bool = False) -> bool:
@@ -60,7 +62,9 @@ class MongoLocks:
             raise LockFailure
         try:
             yield locked
-        except Exception:
+        except Exception as e:
+            raise e
+        finally:
             if locked:
                 self._release(key)
 
@@ -95,6 +99,7 @@ class MongoLocks:
             return True
         if not self._initialized:
             self._initialize()
+        self._pid_check()
         key = f"{self._ns}__{key}"
         expire_at = time() + expire_in
         id_ = str(uuid4())
@@ -116,12 +121,18 @@ class MongoLocks:
         if self._disabled:
             return
         key = f"{self._ns}__{key}"
-        self._client.delete_one({"_id": key})
         self._locks.discard(key)
+        self._client.delete_one({"_id": key})
 
     def _initialize(self):
         t = Thread(target=self._heartbeat_worker, daemon=True)
         t.start()
+        self._launch_pid = os.getpid()
+
+    def _pid_check(self):
+        if os.getpid() != self._launch_pid:
+            logger.error("MongoLocks instance was forked after initialization. This is not allowed.")
+            raise RuntimeError("MongoLocks instance was forked after initialization. This is not allowed.")
 
     def _heartbeat_worker(self):
         while True:
