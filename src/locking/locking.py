@@ -98,6 +98,7 @@ class MongoLocks:
         if self._disabled:
             return True
         if not self._initialized:
+            self._initialized = True
             self._initialize()
         self._pid_check()
         key = f"{self._ns}__{key}"
