@@ -11,7 +11,11 @@ import pymongo
 from pymongo import MongoClient, ReturnDocument
 from pymongo.database import Database
 
-logger = logging.getLogger(__name__)
+
+def _make_logger():
+    logger = logging.getLogger(__name__)
+    logger.setLevel(logging.warning)
+    return logger
 
 
 class LockFailure(Exception):
@@ -23,7 +27,7 @@ class MongoLocks:
     _COL = "locks"
     _MAX_AGE = 10  # the maximum age (in seconds) a lock can be held (without being refreshed) before it is considered stale and will be released
 
-    def __init__(self, client: Union[MongoClient, Database], namespace: str, disabled: bool = False):
+    def __init__(self, client: Union[MongoClient, Database], namespace: str, disabled: bool = False, logger=None):
         """
         _summary_
 
@@ -48,6 +52,7 @@ class MongoLocks:
         self._locks = set()
         self._initialized = False
         self._launch_pid = None  # Used to ensure that a fully initialized MongoLocks instance does not get forked
+        self.logger = logger if logger is not None else _make_logger()
 
     @contextmanager
     def lock_context(self, key: str, *, raise_exceptions: bool = False) -> bool:
@@ -112,10 +117,13 @@ class MongoLocks:
                 return_document=ReturnDocument.AFTER,
             )
         except pymongo.errors.DuplicateKeyError:
-            return False
-        locked = res["lock_id"] == id_
+            res = None
+        locked = res is not None and (res["lock_id"] == id_)
         if locked:
+            self.logger.debug(f"Sucessfully acquired lock for {key}")
             self._locks.add(key)
+        else:
+            self.logger.debug(f"Failed to acquire lock for {key}")
         return locked
 
     def _release(self, key: str):
@@ -129,17 +137,17 @@ class MongoLocks:
         t = Thread(target=self._heartbeat_worker, daemon=True)
         t.start()
         self._launch_pid = os.getpid()
+        self.logger.debug(f"Heartbeat thread initialized, registered launch pid: {self._launch_pid}")
 
     def _pid_check(self):
-        if os.getpid() != self._launch_pid:
-            logger.error("MongoLocks instance was forked after initialization. This is not allowed.")
+        if os.getpid() not in (self._launch_pid, None):
+            self.logger.error("MongoLocks instance was forked after initialization. This is not allowed.")
             raise RuntimeError("MongoLocks instance was forked after initialization. This is not allowed.")
 
     def _heartbeat_worker(self):
         while True:
             sleep(self._MAX_AGE // 3)
-            for lock_key in tuple(self._locks):
-                try:
-                    self._client.find_one_and_update({"_id": lock_key}, {"$set": {"expires_at": time() + self._MAX_AGE}})
-                except Exception as e:
-                    logger.exception(f"Error while updating lock {lock_key}: {e}")
+            try:
+                self._client.update_many({"_id": {"$in": list(self._locks)}}, {"$set": {"expires_at": time() + self._MAX_AGE}})
+            except Exception as e:
+                self.logger.exception(f"Error while updating locks: {e}")
