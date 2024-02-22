@@ -140,7 +140,7 @@ class MongoLocks:
         self.logger.debug(f"Heartbeat thread initialized, registered launch pid: {self._launch_pid}")
 
     def _pid_check(self):
-        if os.getpid() not in (self._launch_pid, None):
+        if self._launch_pid not in (None, os.getpid()):
             self.logger.error("MongoLocks instance was forked after initialization. This is not allowed.")
             raise RuntimeError("MongoLocks instance was forked after initialization. This is not allowed.")
 
