@@ -147,7 +147,12 @@ class MongoLocks:
     def _heartbeat_worker(self):
         while True:
             sleep(self._MAX_AGE // 3)
-            try:
-                self._client.update_many({"_id": {"$in": list(self._locks)}}, {"$set": {"expires_at": time() + self._MAX_AGE}})
-            except Exception as e:
-                self.logger.exception(f"Error while updating locks: {e}")
+            for n in range(3):
+                try:
+                    self._client.update_many({"_id": {"$in": list(self._locks)}}, {"$set": {"expires_at": time() + self._MAX_AGE}})
+                    break
+                except Exception as e:
+                    err = e
+                    sleep(1 * n)
+            else:
+                self.logger.exception(f"Error while updating locks: {err}")
