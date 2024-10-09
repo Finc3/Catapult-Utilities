@@ -31,8 +31,8 @@ def op1():
 
 def op1():
     # Use `lock_context' to acquire a locked context within a method
-    with mongo_locks.lock_context("op1"):
-        # "op1" is now an operation protected by a lock for the duration of the method execution
+    with mongo_locks.lock_context("op1") as lock:
+        # If `lock` is True, "op1" is now an operation protected by a lock for the duration of the method execution
         print("Working...")
         sleep(20)
         print("...Done")

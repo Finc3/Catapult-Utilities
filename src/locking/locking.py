@@ -14,7 +14,7 @@ from pymongo.database import Database
 
 def _make_logger():
     logger = logging.getLogger(__name__)
-    logger.setLevel(logging.warning)
+    logger.setLevel(logging.WARNING)
     return logger
 
 
@@ -94,12 +94,11 @@ class MongoLocks:
             return inner
 
         if callable(key):
-            # assuming simplified usage, e.g. key = f.__name__
             return outer(key)
         else:
             return outer
 
-    def _acquire(self, key: str, expire_in=int):
+    def _acquire(self, key: str, expire_in: int = 0):
         if self._disabled:
             return True
         if not self._initialized:
