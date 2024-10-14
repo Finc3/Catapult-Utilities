@@ -26,6 +26,7 @@ class MongoLocks:
     _DEFAULT_DB = "mongo_locks"
     _COL = "locks"
     _MAX_AGE = 10  # the maximum age (in seconds) a lock can be held (without being refreshed) before it is considered stale and will be released
+    _POOLING_INTERVAL = 100  # the interval (in milliseconds) to try to acquire a lock
 
     def __init__(self, client: Union[MongoClient, Database], namespace: str, disabled: bool = False, logger=None):
         """
@@ -55,14 +56,15 @@ class MongoLocks:
         self.logger = logger if logger is not None else _make_logger()
 
     @contextmanager
-    def lock_context(self, key: str, *, raise_exceptions: bool = False) -> bool:
+    def lock_context(self, key: str, *, raise_exceptions: bool = False, wait_for: int = 0) -> bool:
         """Context manager to acquire and release an application-wide lock on a resource.
 
         Args:
             key (str): The name of the resource to lock.
             raise_exceptions (bool, optional): Whether or not to raise `LockFailure` when a lock could not be achieved.
+            wait_for (int, optional): The maximum time (in seconds) to wait for a lock to be acquired.
         """
-        locked = self._acquire(key, self._MAX_AGE)
+        locked = self._acquire(key, self._MAX_AGE, wait_for)
         if not locked and raise_exceptions:
             raise LockFailure
         try:
@@ -73,13 +75,14 @@ class MongoLocks:
             if locked:
                 self._release(key)
 
-    def lock(self, key: str, *, raise_exceptions: bool = False):
+    def lock(self, key: str, *, raise_exceptions: bool = False, wait_for: int = 0):
         """Decorator to acquire and release an application-wide lock on a resource.
         Silently ignores execution if `raise_exceptions` is False and lock could not be acquired.
 
         Args:
             key (str): The name of the resource to lock.
             raise_exceptions (bool, optional): Whether or not to raise `LockFailure` when a lock could not be achieved.
+            wait_for (int, optional): The maximum time (in seconds) to wait for a lock to be acquired.
         """
 
         key_name = key.__name__ if callable(key) else key
@@ -87,7 +90,7 @@ class MongoLocks:
         def outer(f):
             @wraps(f)
             def inner():
-                with self.lock_context(key_name, raise_exceptions=raise_exceptions) as lock:
+                with self.lock_context(key_name, raise_exceptions=raise_exceptions, wait_for=wait_for) as lock:
                     if lock:
                         f()
 
@@ -98,7 +101,7 @@ class MongoLocks:
         else:
             return outer
 
-    def _acquire(self, key: str, expire_in: int = 0):
+    def _acquire(self, key: str, expire_in: int = 0, wait_for: int = 0) -> bool:
         if self._disabled:
             return True
         if not self._initialized:
@@ -108,22 +111,34 @@ class MongoLocks:
         key = f"{self._ns}__{key}"
         expire_at = time() + expire_in
         id_ = str(uuid4())
-        try:
-            res = self._client.find_one_and_replace(
-                {"_id": key, "$or": [{"expires_at": {"$exists": False}}, {"expires_at": {"$lte": time()}}]},
-                {"expires_at": expire_at, "lock_id": id_},
-                upsert=True,
-                return_document=ReturnDocument.AFTER,
-            )
-        except pymongo.errors.DuplicateKeyError:
-            res = None
-        locked = res is not None and (res["lock_id"] == id_)
+
+        lock = self._try_acquire(key, expire_at, id_)
+        if lock is None and wait_for:
+            _start = time()
+            while lock is None:
+                if time() - _start > wait_for:
+                    break
+                lock = self._try_acquire(key, expire_at, id_)
+                sleep(self._POOLING_INTERVAL / 1000)
+
+        locked = lock is not None and (lock["lock_id"] == id_)
         if locked:
             self.logger.debug(f"Sucessfully acquired lock for {key}")
             self._locks.add(key)
         else:
             self.logger.debug(f"Failed to acquire lock for {key}")
         return locked
+
+    def _try_acquire(self, key: str, expire_at: int, id_: str):
+        try:
+            return self._client.find_one_and_replace(
+                {"_id": key, "$or": [{"expires_at": {"$exists": False}}, {"expires_at": {"$lte": time()}}]},
+                {"expires_at": expire_at, "lock_id": id_},
+                upsert=True,
+                return_document=ReturnDocument.AFTER,
+            )
+        except pymongo.errors.DuplicateKeyError:
+            return None
 
     def _release(self, key: str):
         if self._disabled:
