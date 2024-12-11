@@ -89,10 +89,10 @@ class MongoLocks:
 
         def outer(f):
             @wraps(f)
-            def inner():
+            def inner(*args, **kwargs):
                 with self.lock_context(key_name, raise_exceptions=raise_exceptions, wait_for=wait_for) as lock:
                     if lock:
-                        f()
+                        f(*args, **kwargs)
 
             return inner
 
