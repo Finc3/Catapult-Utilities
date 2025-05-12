@@ -26,3 +26,7 @@ dependencies = [
     "azure-eventhub >= 5.15.0"
 ]
 dynamic = ["version"]
+
+[tool.setuptools]
+packages = ["event_hub", "locking"]
+package-dir = {"" = "src"}
