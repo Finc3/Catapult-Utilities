@@ -44,7 +44,7 @@ class EventHubSender:
         if self._running:
             return
         self._running = True
-        self._thread = threading.Thread(target=self._start_loop)
+        self._thread = threading.Thread(target=self._start_loop, daemon=True)
         self._thread.start()
 
     def add_event(self, payload):
@@ -63,7 +63,8 @@ class EventHubSender:
     def shutdown(self):
         if self._running:
             self._running = False
-            self._thread.join()
+            if self._thread:
+                self._thread.join(timeout=15)
 
     def _start_loop(self):
         asyncio.run(self._run_loop())
