@@ -70,8 +70,11 @@ class EventHubSender:
         asyncio.run(self._run_loop())
 
     async def _run_loop(self):
-        producer = EventHubProducerClient.from_connection_string(conn_str=self.connection_string, eventhub_name=self.eventhub_name)
-        self.logger.debug("[EventHubSender] Started event loop with batching")
+        producer = self._create_producer()
+        if not producer:
+            self.logger.error("[EventHubSender] No producer created, exiting")
+            self._running = False
+            return
         batch = []
         last_flush = time.time()
         try:
@@ -104,3 +107,12 @@ class EventHubSender:
                 self.logger.debug("[EventHubSender] Skipped event too large for batch")
         await producer.send_batch(batch)
         self.logger.debug(f"[EventHubSender] Sent batch of {len(payloads)} event(s)")
+
+    def _create_producer(self):
+        try:
+            producer = EventHubProducerClient.from_connection_string(self.connection_string, eventhub_name=self.eventhub_name)
+            self.logger.debug("[EventHubSender] Producer created")
+            return producer
+        except Exception as e:
+            self.logger.error(f"[EventHubSender] Failed to create producer: {e}")
+            return None
