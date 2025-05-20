@@ -85,21 +85,22 @@ class MongoLocks:
             wait_for (int, optional): The maximum time (in seconds) to wait for a lock to be acquired.
         """
 
-        key_name = key.__name__ if callable(key) else key
+        def decorator(f):
+            key_name = key or f.__name__
 
-        def outer(f):
             @wraps(f)
-            def inner(*args, **kwargs):
+            def wrapped(*args, **kwargs):
                 with self.lock_context(key_name, raise_exceptions=raise_exceptions, wait_for=wait_for) as lock:
                     if lock:
-                        f(*args, **kwargs)
+                        return f(*args, **kwargs)
 
-            return inner
+            return wrapped
 
         if callable(key):
-            return outer(key)
-        else:
-            return outer
+            func = key
+            key = func.__name__
+            return decorator(func)
+        return decorator
 
     def _acquire(self, key: str, expire_in: int = 0, wait_for: int = 0) -> bool:
         if self._disabled:
