@@ -8,7 +8,7 @@ build-backend = "setuptools.build_meta"
 name = "catapult-util"
 description = "Catapult Utilities"
 readme = "README.rst"
-authors = [{name = "Lukas Moors", email = "me@lukasmoors.com"}]
+authors = [{name = "Lukas Moors", email = "me@lukasmoors.com"}, {name = "Bruno Firnkes", email = "bruno.firnkes@frontrowgroup.de"}]
 classifiers = [
     "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Developers",
@@ -19,7 +19,7 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
 ]
-keywords = ["locking", "eventhub"]
+keywords = ["locking", "eventhub", "otel"]
 requires-python = ">= 3.9"
 dependencies = [
     "pymongo > 4.0",
@@ -28,5 +28,5 @@ dependencies = [
 dynamic = ["version"]
 
 [tool.setuptools]
-packages = ["event_hub", "locking"]
+packages = ["event_hub", "locking", "otel"]
 package-dir = {"" = "src"}
