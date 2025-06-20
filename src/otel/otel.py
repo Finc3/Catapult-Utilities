@@ -4,6 +4,7 @@ from multiprocessing import SimpleQueue
 from typing import Any, Dict, Optional
 
 from opentelemetry import metrics
+from opentelemetry.exporter.otlp.proto.http import Compression
 from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter
 from opentelemetry.metrics import Observation
 from opentelemetry.sdk.metrics import MeterProvider
@@ -20,14 +21,17 @@ class OTELMetricsExporter:
         service_name: str = "multiprocess_app",
         credentials: Optional[Dict[str, Any]] = None,
         export_interval_ms: int = 5000,
+        compression: str = "none",
     ):
         self._metric_queue = SimpleQueue()
         self._instruments = {}
-        self._setup_meter_provider(endpoint, service_name, credentials, export_interval_ms)
+        self._setup_meter_provider(endpoint, service_name, credentials, export_interval_ms, compression)
         self._start_consumer_thread()
         atexit.register(self.shutdown)
 
-    def _setup_meter_provider(self, endpoint: str, service_name: str, credentials: Optional[Dict[str, Any]], export_interval_ms: int):
+    def _setup_meter_provider(
+        self, endpoint: str, service_name: str, credentials: Optional[Dict[str, Any]], export_interval_ms: int, compression: str
+    ):
         """Configure the OpenTelemetry meter provider"""
         resource = Resource.create({"service.name": service_name})
 
@@ -37,6 +41,8 @@ class OTELMetricsExporter:
                 exporter_args["headers"] = credentials["headers"]
             if "insecure" in credentials:
                 exporter_args["insecure"] = credentials["insecure"]
+        if compression:
+            exporter_args["compression"] = Compression(compression)
 
         exporter = OTLPMetricExporter(**exporter_args)
         reader = PeriodicExportingMetricReader(exporter, export_interval_millis=export_interval_ms)
