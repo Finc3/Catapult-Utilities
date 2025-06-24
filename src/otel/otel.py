@@ -1,35 +1,32 @@
 import atexit
 import threading
-import time
-from multiprocessing import SimpleQueue
+from multiprocessing import Queue
+from queue import Empty
 from typing import Any, Dict, Optional
 
 from opentelemetry import metrics
 from opentelemetry.exporter.otlp.proto.http import Compression
 from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter
 from opentelemetry.metrics import Observation
-from opentelemetry.sdk.metrics import MeterProvider
+from opentelemetry.sdk.metrics import Counter, MeterProvider
 from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
 from opentelemetry.sdk.resources import Resource
 
-from .otel_types import Metric, MetricType
+from .otel_types import Metric
 
 
 class OTELMetricsExporter:
     def __init__(
         self,
-        endpoint: str = "localhost:4317",
-        service_name: str = "my_service",
+        endpoint: str = "http://0.0.0.0:4318/v1/metrics",
+        service_name: str = "multiprocess_app",
         credentials: Optional[Dict[str, Any]] = None,
-        export_interval_s: int = 5,
+        export_interval_ms: int = 10000,
         compression: str = "none",
     ):
-        self._metric_queue = SimpleQueue()
+        self._metric_queue = Queue()
         self._instruments = {}
-        self._batch = {}
-        self._last_flush = 0
-        self._export_interval_s = export_interval_s
-        self._setup_meter_provider(endpoint, service_name, credentials, export_interval_s, compression)
+        self._setup_meter_provider(endpoint, service_name, credentials, export_interval_ms, compression)
         self._start_consumer_thread()
         atexit.register(self.shutdown)
 
@@ -38,7 +35,7 @@ class OTELMetricsExporter:
         endpoint: str,
         service_name: str,
         credentials: Optional[Dict[str, Any]],
-        export_interval_s: int,
+        export_interval_ms: int,
         compression: str,
     ):
         """Configure the OpenTelemetry meter provider"""
@@ -52,7 +49,7 @@ class OTELMetricsExporter:
             exporter_args["compression"] = Compression(compression)
 
         exporter = OTLPMetricExporter(**exporter_args)
-        reader = PeriodicExportingMetricReader(exporter, export_interval_millis=export_interval_s * 1000)
+        reader = PeriodicExportingMetricReader(exporter, export_interval_millis=export_interval_ms)
         resource = Resource.create({"service.name": service_name})
         self._meter_provider = MeterProvider(metric_readers=[reader], resource=resource)
         metrics.set_meter_provider(self._meter_provider)
@@ -65,87 +62,42 @@ class OTELMetricsExporter:
 
     def _consume_metrics(self):
         """Process metrics from the queue"""
-        self._last_flush = time.time()
         while True:
-            metric = self._metric_queue.get()
-            if metric is None:  # Shutdown signal
-                self._wait_to_flush()
-                self._flush()
-                break
-            self._add_to_batch(metric)
-            if (time.time() - self._last_flush) >= self._export_interval_s:
-                self._flush()
+            try:
+                metric = self._metric_queue.get(timeout=1)
+                if metric is None:  # Shutdown signal
+                    break
+                self._process_metric(metric)
+            except Empty:
+                continue
 
-    def _add_to_batch(self, metric: Metric):
-        """Add a metric to the batch for processing"""
-        key = self._get_metric_key(metric)
-        if key not in self._batch:
-            self._batch[key] = []
-        self._batch[key].append(metric)
+    def _process_metric(self, metric: Metric):
+        """Record the metric based on its type"""
+        metric_type = metric.type
+        name = metric.name
+        value = metric.value
+        attributes = metric.attributes
+        description = metric.description
+        unit = metric.unit
+        # Get or create instrument
+        instrument_key = f"{metric_type}:{name}"
+        if instrument_key not in self._instruments:
+            if metric_type == "counter":
+                self._instruments[instrument_key] = self._meter.create_counter(name, description=description, unit=unit)
+            elif metric_type == "gauge":
+                self._instruments[instrument_key] = self._meter.create_observable_gauge(
+                    name,
+                    callbacks=[lambda _: [Observation(value, attributes)]],
+                    description=description,
+                    unit=unit,
+                )
+            elif metric_type == "histogram":
+                self._instruments[instrument_key] = self._meter.create_histogram(name, description=description, unit=unit)
 
-    def _get_metric_key(self, metric: Metric) -> tuple[MetricType, str, frozenset]:
-        """Create a unique key for the metric based on its type, name and attributes"""
-        return (
-            metric.type,
-            metric.name,
-            frozenset(metric.attributes.items()) if metric.attributes else frozenset(),
-        )
-
-    def _flush(self):
-        """Flush the batch of metrics to the exporter"""
-        for key, metrics_list in self._batch.items():
-            metric_template = metrics_list[0]
-            instr = self._get_or_create_instrument(key, metric_template)
-            if metric_template.type == "counter":
-                self._process_counters(instr, metrics_list)
-            elif metric_template.type == "histogram":
-                self._process_histograms(instr, metrics_list)
-            # Gauges are handled differently as they're observable
-
-        self._batch.clear()
-        self._last_flush = time.time()
-
-    def _wait_to_flush(self):
-        # Add sleep to avoid sequential flushes
-        if (time.time() - self._last_flush) < self._export_interval_s:
-            time.sleep(self._export_interval_s - (time.time() - self._last_flush))
-
-    def _get_or_create_instrument(self, key: tuple, metric: Metric):
-        """Get or create the appropriate instrument for the metric"""
-        if key in self._instruments:
-            return self._instruments[key]
-
-        if metric.type == "counter":
-            self._instruments[key] = self._meter.create_counter(metric.name, description=metric.description, unit=metric.unit)
-        elif metric.type == "gauge":
-            self._instruments[key] = self._meter.create_observable_gauge(
-                metric.name,
-                callbacks=[lambda _: [Observation(metric.value, metric.attributes)]],
-                description=metric.description,
-                unit=metric.unit,
-            )
-        elif metric.type == "histogram":
-            self._instruments[key] = self._meter.create_histogram(metric.name, description=metric.description, unit=metric.unit)
-        else:
-            raise ValueError(f"Unsupported metric type: {metric.type}")
-
-        return self._instruments[key]
-
-    def _process_counters(self, instrument, metrics):
-        """Process counter metrics and record them."""
-        total_value = sum(metric.value for metric in metrics)
-        instrument.add(
-            total_value,
-            attributes=metrics[0].attributes if metrics[0].attributes else {},
-        )
-
-    def _process_histograms(self, instrument, metrics):
-        """Process histogram metrics and record them"""
-        for metric in metrics:
-            instrument.record(
-                metric.value,
-                attributes=metric.attributes if metric.attributes else {},
-            )
+        if metric_type == "counter":
+            self._instruments[instrument_key].add(value, attributes)
+        elif metric_type == "histogram":
+            self._instruments[instrument_key].record(value, attributes)
 
     def shutdown(self):
         """Clean shutdown of metrics collection"""
