@@ -8,11 +8,20 @@ from opentelemetry import metrics
 from opentelemetry.exporter.otlp.proto.http import Compression
 from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter
 from opentelemetry.metrics import Observation
-from opentelemetry.sdk.metrics import Counter, MeterProvider
+from opentelemetry.sdk.metrics import MeterProvider
 from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
 from opentelemetry.sdk.resources import Resource
 
 from .otel_types import Metric
+
+
+# Prevent PeriodicExportingMetricReader from reinit _ticker thread and duplicate metrics exporting
+def _noop_at_fork_reinit(self):
+    pass
+
+
+if hasattr(PeriodicExportingMetricReader, "_at_fork_reinit"):
+    PeriodicExportingMetricReader._at_fork_reinit = _noop_at_fork_reinit
 
 
 class OTELMetricsExporter:
@@ -73,31 +82,33 @@ class OTELMetricsExporter:
 
     def _process_metric(self, metric: Metric):
         """Record the metric based on its type"""
-        metric_type = metric.type
-        name = metric.name
-        value = metric.value
-        attributes = metric.attributes
-        description = metric.description
-        unit = metric.unit
-        # Get or create instrument
-        instrument_key = f"{metric_type}:{name}"
-        if instrument_key not in self._instruments:
-            if metric_type == "counter":
-                self._instruments[instrument_key] = self._meter.create_counter(name, description=description, unit=unit)
-            elif metric_type == "gauge":
-                self._instruments[instrument_key] = self._meter.create_observable_gauge(
-                    name,
-                    callbacks=[lambda _: [Observation(value, attributes)]],
-                    description=description,
-                    unit=unit,
-                )
-            elif metric_type == "histogram":
-                self._instruments[instrument_key] = self._meter.create_histogram(name, description=description, unit=unit)
+        instr = self._get_or_create_instrument(metric)
+        if metric.type == "counter":
+            instr.add(metric.value, metric.attributes)
+        elif metric.type == "histogram":
+            instr.record(metric.value, metric.attributes)
 
-        if metric_type == "counter":
-            self._instruments[instrument_key].add(value, attributes)
-        elif metric_type == "histogram":
-            self._instruments[instrument_key].record(value, attributes)
+    def _get_or_create_instrument(self, metric: Metric):
+        """Get or create the appropriate instrument for the metric"""
+        key = (metric.type, metric.name)
+        if key in self._instruments:
+            return self._instruments[key]
+
+        if metric.type == "counter":
+            self._instruments[key] = self._meter.create_counter(metric.name, description=metric.description, unit=metric.unit)
+        elif metric.type == "gauge":
+            self._instruments[key] = self._meter.create_observable_gauge(
+                metric.name,
+                callbacks=[lambda _: [Observation(metric.value, metric.attributes)]],
+                description=metric.description,
+                unit=metric.unit,
+            )
+        elif metric.type == "histogram":
+            self._instruments[key] = self._meter.create_histogram(metric.name, description=metric.description, unit=metric.unit)
+        else:
+            raise ValueError(f"Unsupported metric type: {metric.type}")
+
+        return self._instruments[key]
 
     def shutdown(self):
         """Clean shutdown of metrics collection"""
