@@ -69,6 +69,7 @@ class OTELMetricsExporter:
         while True:
             metric = self._metric_queue.get()
             if metric is None:  # Shutdown signal
+                self._wait_to_flush()
                 self._flush()
                 break
             self._add_to_batch(metric)
@@ -103,6 +104,11 @@ class OTELMetricsExporter:
 
         self._batch.clear()
         self._last_flush = time.time()
+
+    def _wait_to_flush(self):
+        # Add sleep to avoid sequential flushes
+        if (time.time() - self._last_flush) < self._export_interval_s:
+            time.sleep(self._export_interval_s - (time.time() - self._last_flush))
 
     def _get_or_create_instrument(self, key: tuple, metric: Metric):
         """Get or create the appropriate instrument for the metric"""
