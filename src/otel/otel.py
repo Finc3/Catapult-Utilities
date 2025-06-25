@@ -15,7 +15,8 @@ from opentelemetry.sdk.resources import Resource
 from .otel_types import Metric
 
 
-# Prevent PeriodicExportingMetricReader from reinit _ticker thread and duplicate metrics exporting
+# Prevent PeriodicExportingMetricReader from reinit _ticker thread after fork.
+# This is a workaround since our applications can fork after the OTELMetricsExporter started exporting metrics.
 def _noop_at_fork_reinit(self):
     pass
 
@@ -87,6 +88,8 @@ class OTELMetricsExporter:
             instr.add(metric.value, metric.attributes)
         elif metric.type == "histogram":
             instr.record(metric.value, metric.attributes)
+        elif metric.type == "gauge":
+            instr.set(metric.value, metric.attributes)
 
     def _get_or_create_instrument(self, metric: Metric):
         """Get or create the appropriate instrument for the metric"""
@@ -97,12 +100,7 @@ class OTELMetricsExporter:
         if metric.type == "counter":
             self._instruments[key] = self._meter.create_counter(metric.name, description=metric.description, unit=metric.unit)
         elif metric.type == "gauge":
-            self._instruments[key] = self._meter.create_observable_gauge(
-                metric.name,
-                callbacks=[lambda _: [Observation(metric.value, metric.attributes)]],
-                description=metric.description,
-                unit=metric.unit,
-            )
+            self._instruments[key] = self._meter.create_gauge(metric.name, description=metric.description, unit=metric.unit)
         elif metric.type == "histogram":
             self._instruments[key] = self._meter.create_histogram(metric.name, description=metric.description, unit=metric.unit)
         else:
