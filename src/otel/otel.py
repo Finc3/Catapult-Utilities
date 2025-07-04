@@ -31,7 +31,7 @@ class OTELMetricsExporter:
         endpoint: str = "http://0.0.0.0:4318/v1/metrics",
         service_name: str = "multiprocess_app",
         credentials: Optional[Dict[str, Any]] = None,
-        export_interval_ms: int = 10000,
+        export_interval_ms: int = 60000,
         compression: str = "none",
     ):
         self._metric_queue = Queue()
