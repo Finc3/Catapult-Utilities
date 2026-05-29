@@ -3,34 +3,99 @@ from typing import Dict, Literal, Optional
 MetricType = Literal["counter", "gauge", "histogram"]
 
 
+# Base Metric class
 class Metric:
     def __init__(
         self,
-        metric_type: MetricType,
         name: str,
         value: int | float,
         attributes: Optional[Dict[str, str]] = None,
         description: str = "",
         unit: str = "1",
     ):
-        self.type = metric_type
         self.name = name
         self.value = value
         self.attributes = attributes or {}
         self.description = description
         self.unit = unit
 
-    @classmethod
-    def counter(cls, name: str, value: int = 1, attributes: Optional[Dict[str, str]] = None, description: str = "", unit: str = "1") -> "Metric":
-        """Create a counter metric"""
-        return cls("counter", name, value, attributes, description, unit)
+
+class CounterMetric(Metric):
+    type: MetricType = "counter"
+
+    def __init__(
+        self,
+        name: str,
+        value: int = 1,
+        attributes: Optional[Dict[str, str]] = None,
+        description: str = "",
+        unit: str = "1",
+    ):
+        super().__init__(name, value, attributes, description, unit)
+        self.type = "counter"
 
     @classmethod
-    def gauge(cls, name: str, value: float, attributes: Optional[Dict[str, str]] = None, description: str = "", unit: str = "1") -> "Metric":
-        """Create a gauge metric"""
-        return cls("gauge", name, value, attributes, description, unit)
+    def create(
+        cls,
+        name: str,
+        value: int = 1,
+        attributes: Optional[Dict[str, str]] = None,
+        description: str = "",
+        unit: str = "1",
+    ) -> "CounterMetric":
+        return cls(name, value, attributes, description, unit)
+
+
+class GaugeMetric(Metric):
+    type: MetricType = "gauge"
+
+    def __init__(
+        self,
+        name: str,
+        value: float = 0.0,
+        attributes: Optional[Dict[str, str]] = None,
+        description: str = "",
+        unit: str = "1",
+    ):
+        super().__init__(name, value, attributes, description, unit)
+        self.type = "gauge"
 
     @classmethod
-    def histogram(cls, name: str, value: float, attributes: Optional[Dict[str, str]] = None, description: str = "", unit: str = "1") -> "Metric":
-        """Create a histogram metric"""
-        return cls("histogram", name, value, attributes, description, unit)
+    def create(
+        cls,
+        name: str,
+        value: float,
+        attributes: Optional[Dict[str, str]] = None,
+        description: str = "",
+        unit: str = "1",
+    ) -> "GaugeMetric":
+        return cls(name, value, attributes, description, unit)
+
+
+class HistogramMetric(Metric):
+    type: MetricType = "histogram"
+
+    def __init__(
+        self,
+        name: str,
+        value: float,
+        attributes: Optional[Dict[str, str]] = None,
+        description: str = "",
+        unit: str = "1",
+        boundaries: Optional[list[float]] = None,
+    ):
+        super().__init__(name, value, attributes, description, unit)
+        self.type = "histogram"
+        self.boundaries = boundaries
+
+    @classmethod
+    def create(
+        cls,
+        name: str,
+        value: float,
+        attributes: Optional[Dict[str, str]] = None,
+        description: str = "",
+        unit: str = "1",
+        boundaries: Optional[list[float]] = None,
+    ) -> "HistogramMetric":
+        return cls(name, value, attributes, description, unit, boundaries)

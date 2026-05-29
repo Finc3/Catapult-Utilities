@@ -7,12 +7,11 @@ from typing import Any, Dict, Optional
 from opentelemetry import metrics
 from opentelemetry.exporter.otlp.proto.http import Compression
 from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter
-from opentelemetry.metrics import Observation
 from opentelemetry.sdk.metrics import MeterProvider
 from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
 from opentelemetry.sdk.resources import Resource
 
-from .otel_types import Metric
+from .otel_types import CounterMetric, GaugeMetric, HistogramMetric, Metric
 
 
 # Prevent PeriodicExportingMetricReader from reinit _ticker thread after fork.
@@ -84,11 +83,11 @@ class OTELMetricsExporter:
     def _process_metric(self, metric: Metric):
         """Record the metric based on its type"""
         instr = self._get_or_create_instrument(metric)
-        if metric.type == "counter":
+        if isinstance(metric, CounterMetric):
             instr.add(metric.value, metric.attributes)
-        elif metric.type == "histogram":
+        elif isinstance(metric, HistogramMetric):
             instr.record(metric.value, metric.attributes)
-        elif metric.type == "gauge":
+        elif isinstance(metric, GaugeMetric):
             instr.set(metric.value, metric.attributes)
 
     def _get_or_create_instrument(self, metric: Metric):
@@ -97,12 +96,14 @@ class OTELMetricsExporter:
         if key in self._instruments:
             return self._instruments[key]
 
-        if metric.type == "counter":
+        if isinstance(metric, CounterMetric):
             self._instruments[key] = self._meter.create_counter(metric.name, description=metric.description, unit=metric.unit)
-        elif metric.type == "gauge":
+        elif isinstance(metric, GaugeMetric):
             self._instruments[key] = self._meter.create_gauge(metric.name, description=metric.description, unit=metric.unit)
-        elif metric.type == "histogram":
-            self._instruments[key] = self._meter.create_histogram(metric.name, description=metric.description, unit=metric.unit)
+        elif isinstance(metric, HistogramMetric):
+            self._instruments[key] = self._meter.create_histogram(
+                metric.name, description=metric.description, unit=metric.unit, explicit_bucket_boundaries_advisory=metric.boundaries
+            )
         else:
             raise ValueError(f"Unsupported metric type: {metric.type}")
 
@@ -123,7 +124,7 @@ class OTELMetricsExporter:
         unit: str = "1",
     ):
         """Record a counter metric from any process"""
-        self._metric_queue.put(Metric.counter(name, value, attributes, description, unit))
+        self._metric_queue.put(CounterMetric(name, value, attributes, description, unit))
 
     def record_gauge(
         self,
@@ -134,7 +135,7 @@ class OTELMetricsExporter:
         unit: str = "1",
     ):
         """Record a gauge metric from any process"""
-        self._metric_queue.put(Metric.gauge(name, value, attributes, description, unit))
+        self._metric_queue.put(GaugeMetric(name, value, attributes, description, unit))
 
     def record_histogram(
         self,
@@ -143,6 +144,7 @@ class OTELMetricsExporter:
         attributes: Optional[Dict[str, str]] = None,
         description: str = "",
         unit: str = "1",
+        boundaries: Optional[list[float]] = None,
     ):
         """Record a histogram metric from any process"""
-        self._metric_queue.put(Metric.histogram(name, value, attributes, description, unit))
+        self._metric_queue.put(HistogramMetric(name, value, attributes, description, unit, boundaries))
