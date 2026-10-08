@@ -2,7 +2,7 @@ import atexit
 import threading
 from multiprocessing import Queue
 from queue import Empty
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Protocol
 
 from opentelemetry import metrics
 from opentelemetry.exporter.otlp.proto.http import Compression
@@ -24,6 +24,23 @@ if hasattr(PeriodicExportingMetricReader, "_at_fork_reinit"):
     PeriodicExportingMetricReader._at_fork_reinit = _noop_at_fork_reinit
 
 
+class MetricsExporter(Protocol):
+    def record_counter(self, name: str, value: int = 1, attributes: Optional[Dict[str, str]] = None,
+                       description: str = "", unit: str = "1") -> None: ...
+    def record_gauge(self, name: str, value: float, attributes: Optional[Dict[str, str]] = None,
+                     description: str = "", unit: str = "1") -> None: ...
+    def record_histogram(self, name: str, value: float, attributes: Optional[Dict[str, str]] = None,
+                         description: str = "", unit: str = "1", boundaries: Optional[list[float]] = None) -> None: ...
+    def shutdown(self) -> None: ...
+
+
+class NoOpMetricsExporter:
+    def record_counter(self, *args, **kwargs) -> None: pass
+    def record_gauge(self, *args, **kwargs) -> None: pass
+    def record_histogram(self, *args, **kwargs) -> None: pass
+    def shutdown(self) -> None: pass
+
+
 class OTELMetricsExporter:
     def __init__(
         self,
@@ -32,10 +49,11 @@ class OTELMetricsExporter:
         credentials: Optional[Dict[str, Any]] = None,
         export_interval_ms: int = 60000,
         compression: str = "none",
+        instance_id: Optional[str] = None,
     ):
         self._metric_queue = Queue()
         self._instruments = {}
-        self._setup_meter_provider(endpoint, service_name, credentials, export_interval_ms, compression)
+        self._setup_meter_provider(endpoint, service_name, instance_id, credentials, export_interval_ms, compression)
         self._start_consumer_thread()
         atexit.register(self.shutdown)
 
@@ -43,6 +61,7 @@ class OTELMetricsExporter:
         self,
         endpoint: str,
         service_name: str,
+        instance_id: Optional[str],
         credentials: Optional[Dict[str, Any]],
         export_interval_ms: int,
         compression: str,
@@ -59,7 +78,10 @@ class OTELMetricsExporter:
 
         exporter = OTLPMetricExporter(**exporter_args)
         reader = PeriodicExportingMetricReader(exporter, export_interval_millis=export_interval_ms)
-        resource = Resource.create({"service.name": service_name})
+        resource_attributes = {"service.name": service_name}
+        if instance_id:
+            resource_attributes["service.instance.id"] = instance_id
+        resource = Resource.create(resource_attributes)
         self._meter_provider = MeterProvider(metric_readers=[reader], resource=resource)
         metrics.set_meter_provider(self._meter_provider)
         self._meter = metrics.get_meter("metrics_exporter")
